@@ -1,0 +1,16 @@
+# local / generated
+tools/*
+!tools/README.md
+*.log
+*.dll
+*.mun
+*.ico
+*.png
+*.jpg
+
+# OS / editor
+Thumbs.db
+Desktop.ini
+.DS_Store
+.vscode/
+.idea/
