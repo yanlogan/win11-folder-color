@@ -1,100 +1,100 @@
 # win11-folder-color
 
-Recolor **default** Windows 11 / Windows 10 folder icons system-wide — including **Details, Medium, Large, Tiles, and Content** views — while keeping normal file thumbnails.
+Перекрашивает **дефолтные** иконки папок Windows 11 / Windows 10 на всю систему — включая виды **Таблица (Details), Средние, Крупные, Плитки (Tiles) и Содержимое (Content)** — и при этом оставляет обычные превью файлов (фото/видео).
 
-Windows ignores the classic `Shell Icons` registry trick for medium+ folder views because those views use **folder thumbnails** from `imageres.dll.mun`. This script patches that file (with a backup) and optionally sets `Shell Icons` as a small-icon fallback.
+Классический трюк с реестром `Shell Icons` Windows игнорирует на medium+ видах: там рисуются **thumbnail папок** из `imageres.dll.mun`. Скрипт патчит этот файл (с бэкапом) и дополнительно прописывает `Shell Icons` как запасной вариант для мелких иконок.
 
 ![concept](https://img.shields.io/badge/Windows-11%20%2F%2010-blue) ![ps](https://img.shields.io/badge/PowerShell-5.1%2B-steelblue) ![license](https://img.shields.io/badge/license-MIT-green)
 
-## Requirements
+## Требования
 
-- Windows 10 1903+ or Windows 11 (uses `C:\Windows\SystemResources\imageres.dll.mun`)
-- **Administrator** PowerShell
-- [Resource Hacker](https://angusj.com/resourcehacker/) installed  
-  (or put `ResourceHacker.exe` in `.\tools\`)
+- Windows 10 1903+ или Windows 11 (нужен `C:\Windows\SystemResources\imageres.dll.mun`)
+- PowerShell **от администратора**
+- Установленный [Resource Hacker](https://angusj.com/resourcehacker/)  
+  (или положите `ResourceHacker.exe` в `.\tools\`)
 
-> Resource Hacker is freeware by Angus Johnson. This repo does **not** redistribute it.
+> Resource Hacker — freeware от Angus Johnson. Этот репозиторий его **не распространяет**.
 
-## Quick start
+## Быстрый старт
 
 ```powershell
-# elevated PowerShell
+# PowerShell от имени администратора
 Set-ExecutionPolicy -Scope Process Bypass
 cd path\to\win11-folder-color
 
-# maroon (default)
+# бордовый (по умолчанию)
 .\Set-FolderColor.ps1
 
-# any color
+# любой цвет
 .\Set-FolderColor.ps1 -Color '#C71313'
 .\Set-FolderColor.ps1 -Color 1E90FF
 
-# your own .ico (skips recolor)
+# своя .ico (без перекраски)
 .\Set-FolderColor.ps1 -IconPath 'D:\Icons\folder-blue.ico'
 
-# restore stock icons
+# вернуть стоковые иконки
 .\Set-FolderColor.ps1 -Restore
 ```
 
-Explorer restarts once during install.
+Во время установки Explorer один раз перезапустится.
 
-## What it changes
+## Что меняется
 
-| Item | Purpose |
-|------|---------|
-| `imageres.dll.mun` icon groups `3,4,5,6,162,174` | Default + thumbnail folder glyphs (medium/tiles/content) |
-| `HKLM\...\Explorer\Shell Icons` values `3` and `4` | Small/list fallback |
-| Backup under `%LOCALAPPDATA%\win11-folder-color\` | Original mun + generated `.ico` |
+| Что | Зачем |
+|------|--------|
+| Группы иконок `3,4,5,6,162,174` в `imageres.dll.mun` | Дефолтные и thumbnail-иконки папок (medium / tiles / content) |
+| `HKLM\...\Explorer\Shell Icons` значения `3` и `4` | Запасной вариант для мелких/списочных видов |
+| Бэкап в `%LOCALAPPDATA%\win11-folder-color\` | Оригинальный mun + сгенерированная `.ico` |
 
-It sets `IconsOnly=0` so **photo/video thumbnails stay enabled**.
+Скрипт выставляет `IconsOnly=0`, чтобы **превью фото и видео оставались включены**.
 
-## After Windows Update
+## После обновления Windows
 
-Feature updates often restore stock `.mun` files. Re-run:
+Крупные обновления часто возвращают стоковые `.mun`. Просто запустите снова:
 
 ```powershell
 .\Set-FolderColor.ps1 -Color '#800000'
 ```
 
-If icons look wrong after an update, restore first, then apply again:
+Если после обновления иконки выглядят криво — сначала откат, потом снова цвет:
 
 ```powershell
 .\Set-FolderColor.ps1 -Restore
 .\Set-FolderColor.ps1 -Color '#800000'
 ```
 
-## Safety notes
+## Важно по безопасности
 
-- Patches a **system resource file**. Always keep the backup (script creates one automatically).
-- `sfc /scannow` or some cumulative updates may revert the patch.
-- Special folders (Desktop, Downloads, OneDrive, custom `desktop.ini` icons) keep their own icons.
-- Do this on a personal machine; company-managed PCs may block ownership changes.
-- On some 24H2/25H2 builds, a reboot may rarely restore stock resources — just re-run the script.
+- Патчится **системный ресурсный файл**. Бэкап создаётся автоматически — не удаляйте его.
+- `sfc /scannow` или некоторые накопительные обновления могут откатить патч.
+- Особые папки (Desktop, Downloads, OneDrive, свои иконки через `desktop.ini`) свои значки сохраняют.
+- Лучше на личной машине; на корпоративных ПК смена владельца системных файлов может быть запрещена.
+- На части сборок 24H2/25H2 после перезагрузки сток иногда возвращается — просто перезапустите скрипт.
 
-## How it works
+## Как это работает
 
-1. Copies `imageres.dll.mun` (or the saved original backup).
-2. Extracts stock folder `ICONGROUP,3` with Resource Hacker.
-3. Recolors that icon to `-Color` (or uses `-IconPath`).
-4. Overwrites folder-related icon groups in a working copy.
-5. Takes ownership, renames the live mun, installs the patched file, clears icon caches, restarts Explorer.
+1. Копирует `imageres.dll.mun` (или сохранённый оригинальный бэкап).
+2. Достаёт стоковую папку `ICONGROUP,3` через Resource Hacker.
+3. Перекрашивает её в `-Color` (или берёт `-IconPath`).
+4. Перезаписывает связанные группы иконок в рабочей копии.
+5. Берёт ownership, переименовывает живой mun, ставит патч, чистит кэш иконок, перезапускает Explorer.
 
-## Restore manually
+## Ручной откат
 
-If needed:
+При необходимости:
 
 ```powershell
-# elevated
+# от администратора
 $bak = "$env:LOCALAPPDATA\win11-folder-color\imageres.dll.mun.original"
 $dst = "$env:SystemRoot\SystemResources\imageres.dll.mun"
-# stop Explorer from Task Manager, then:
+# остановите Explorer в Диспетчере задач, затем:
 Copy-Item $bak $dst -Force
 ```
 
-Or use `.\Set-FolderColor.ps1 -Restore`.
+Или просто: `.\Set-FolderColor.ps1 -Restore`.
 
-## License
+## Лицензия
 
-MIT — see [LICENSE](LICENSE).
+MIT — см. [LICENSE](LICENSE).
 
-Windows® is a trademark of Microsoft Corporation. This project is not affiliated with Microsoft.
+Windows® — товарный знак Microsoft Corporation. Проект не связан с Microsoft.
