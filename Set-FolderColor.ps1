@@ -482,7 +482,9 @@ function Backup-SelectionColors {
     $existing = $null
     if (Test-Path -LiteralPath $path) {
         try { $existing = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json } catch { $existing = $null }
-        if ($existing -and $existing.AccentPaletteHex) { return }
+        if ($existing -and ($existing.PSObject.Properties.Name -contains 'AccentPaletteHex') -and $existing.AccentPaletteHex) {
+            return
+        }
     }
 
     $palette = $null
@@ -491,15 +493,22 @@ function Backup-SelectionColors {
         $palette = ([byte[]]$paletteProp.AccentPalette | ForEach-Object { $_.ToString('X2') }) -join '-'
     }
 
+    function Pick-BackupValue($ExistingObj, [string]$Name, $Fallback) {
+        if ($ExistingObj -and ($ExistingObj.PSObject.Properties.Name -contains $Name) -and ($null -ne $ExistingObj.$Name) -and ($ExistingObj.$Name -ne '')) {
+            return $ExistingObj.$Name
+        }
+        return $Fallback
+    }
+
     $backup = [ordered]@{
-        SavedAt            = if ($existing -and $existing.SavedAt) { $existing.SavedAt } else { (Get-Date).ToString('o') }
-        Hilight            = if ($existing -and $existing.Hilight) { $existing.Hilight } else { (Get-ItemProperty $colorsKey -Name Hilight -EA SilentlyContinue).Hilight }
-        HilightText        = if ($existing -and $existing.HilightText) { $existing.HilightText } else { (Get-ItemProperty $colorsKey -Name HilightText -EA SilentlyContinue).HilightText }
-        HotTrackingColor   = if ($existing -and $existing.HotTrackingColor) { $existing.HotTrackingColor } else { (Get-ItemProperty $colorsKey -Name HotTrackingColor -EA SilentlyContinue).HotTrackingColor }
-        AccentColor        = if ($existing -and $null -ne $existing.AccentColor) { $existing.AccentColor } else { (Get-ItemProperty $dwmKey -Name AccentColor -EA SilentlyContinue).AccentColor }
-        ColorizationColor  = if ($existing -and $null -ne $existing.ColorizationColor) { $existing.ColorizationColor } else { (Get-ItemProperty $dwmKey -Name ColorizationColor -EA SilentlyContinue).ColorizationColor }
-        DwmColorPrevalence = if ($existing -and $null -ne $existing.DwmColorPrevalence) { $existing.DwmColorPrevalence } else { (Get-ItemProperty $dwmKey -Name ColorPrevalence -EA SilentlyContinue).ColorPrevalence }
-        ColorPrevalence    = if ($existing -and $null -ne $existing.ColorPrevalence) { $existing.ColorPrevalence } else { (Get-ItemProperty $themeKey -Name ColorPrevalence -EA SilentlyContinue).ColorPrevalence }
+        SavedAt            = Pick-BackupValue $existing 'SavedAt' (Get-Date).ToString('o')
+        Hilight            = Pick-BackupValue $existing 'Hilight' (Get-ItemProperty $colorsKey -Name Hilight -EA SilentlyContinue).Hilight
+        HilightText        = Pick-BackupValue $existing 'HilightText' (Get-ItemProperty $colorsKey -Name HilightText -EA SilentlyContinue).HilightText
+        HotTrackingColor   = Pick-BackupValue $existing 'HotTrackingColor' (Get-ItemProperty $colorsKey -Name HotTrackingColor -EA SilentlyContinue).HotTrackingColor
+        AccentColor        = Pick-BackupValue $existing 'AccentColor' (Get-ItemProperty $dwmKey -Name AccentColor -EA SilentlyContinue).AccentColor
+        ColorizationColor  = Pick-BackupValue $existing 'ColorizationColor' (Get-ItemProperty $dwmKey -Name ColorizationColor -EA SilentlyContinue).ColorizationColor
+        DwmColorPrevalence = Pick-BackupValue $existing 'DwmColorPrevalence' (Get-ItemProperty $dwmKey -Name ColorPrevalence -EA SilentlyContinue).ColorPrevalence
+        ColorPrevalence    = Pick-BackupValue $existing 'ColorPrevalence' (Get-ItemProperty $themeKey -Name ColorPrevalence -EA SilentlyContinue).ColorPrevalence
         AccentColorMenu    = (Get-ItemProperty $accentKey -Name AccentColorMenu -EA SilentlyContinue).AccentColorMenu
         StartColorMenu     = (Get-ItemProperty $accentKey -Name StartColorMenu -EA SilentlyContinue).StartColorMenu
         AccentPaletteHex   = $palette
@@ -575,7 +584,9 @@ function Restore-SelectionColors {
         if ($null -ne $b.DwmColorPrevalence) { $dwmPrevalence = [int]$b.DwmColorPrevalence }
         if ($null -ne $b.AccentColorMenu) { $accentMenu = [int]$b.AccentColorMenu }
         if ($null -ne $b.StartColorMenu) { $startMenu = [int]$b.StartColorMenu }
-        if ($b.AccentPaletteHex) { $paletteHex = [string]$b.AccentPaletteHex }
+        if (($b.PSObject.Properties.Name -contains 'AccentPaletteHex') -and $b.AccentPaletteHex) {
+            $paletteHex = [string]$b.AccentPaletteHex
+        }
         Write-Step "Restoring selection colors from $path"
     }
     else {
