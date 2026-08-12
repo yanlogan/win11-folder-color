@@ -434,15 +434,33 @@ function Convert-RgbToAccentDword($Rgb) {
 }
 
 function New-AccentPaletteBytes($Rgb) {
-    # Explorer\Accent\AccentPalette = 8 x RGBA (A usually 0), light -> dark.
-    # Slot 3 (bytes 12..14) is the main accent used by many Explorer chrome bits.
-    $factors = @(1.75, 1.45, 1.2, 1.0, 0.85, 0.65, 0.45, 0.3)
+    # Explorer\Accent\AccentPalette = 8 x RGBA (A usually 0).
+    # Early slots are used as light washes (hover); slot 3 is the main accent.
+    $baseR = [double]$Rgb.R; $baseG = [double]$Rgb.G; $baseB = [double]$Rgb.B
+    $points = @(
+        @{ t = 0.82 },  # hover wash (mix toward white)
+        @{ t = 0.65 },
+        @{ t = 0.35 },
+        @{ t = 0.00 },  # main accent
+        @{ t = -0.15 },
+        @{ t = -0.30 },
+        @{ t = -0.45 },
+        @{ t = -0.60 }
+    )
     $bytes = New-Object byte[] 32
     for ($i = 0; $i -lt 8; $i++) {
-        $f = $factors[$i]
-        $r = [byte][Math]::Min(255, [Math]::Round($Rgb.R * $f))
-        $g = [byte][Math]::Min(255, [Math]::Round($Rgb.G * $f))
-        $b = [byte][Math]::Min(255, [Math]::Round($Rgb.B * $f))
+        $t = $points[$i].t
+        if ($t -ge 0) {
+            $r = [byte][Math]::Round($baseR + (255 - $baseR) * $t)
+            $g = [byte][Math]::Round($baseG + (255 - $baseG) * $t)
+            $b = [byte][Math]::Round($baseB + (255 - $baseB) * $t)
+        }
+        else {
+            $k = 1.0 + $t
+            $r = [byte][Math]::Max(0, [Math]::Round($baseR * $k))
+            $g = [byte][Math]::Max(0, [Math]::Round($baseG * $k))
+            $b = [byte][Math]::Max(0, [Math]::Round($baseB * $k))
+        }
         $o = $i * 4
         $bytes[$o] = $r
         $bytes[$o + 1] = $g
@@ -537,10 +555,14 @@ function Set-SelectionColors($Rgb, [switch]$IncludeSystemAccent) {
     $colorsKey = 'HKCU:\Control Panel\Colors'
     Set-ItemProperty -Path $colorsKey -Name 'Hilight' -Value $rgbText
     Set-ItemProperty -Path $colorsKey -Name 'HilightText' -Value $textRgb
-    Set-ItemProperty -Path $colorsKey -Name 'HotTrackingColor' -Value $rgbText
+    # Light wash for legacy hot-track / some hover surfaces
+    $hoverR = [int][Math]::Round($Rgb.R + (255 - $Rgb.R) * 0.82)
+    $hoverG = [int][Math]::Round($Rgb.G + (255 - $Rgb.G) * 0.82)
+    $hoverB = [int][Math]::Round($Rgb.B + (255 - $Rgb.B) * 0.82)
+    Set-ItemProperty -Path $colorsKey -Name 'HotTrackingColor' -Value ('{0} {1} {2}' -f $hoverR, $hoverG, $hoverB)
 
-    Write-Step ("Selection colors set: Hilight/HotTracking={0}, HilightText={1}" -f $rgbText, $textRgb)
-    Write-Host '    Text highlight + drag marquee use Control Panel Colors.' -ForegroundColor DarkGray
+    Write-Step ("Selection colors set: Hilight={0}, HilightText={1}, HotTracking={2} {3} {4}" -f $rgbText, $textRgb, $hoverR, $hoverG, $hoverB)
+    Write-Host '    Text highlight uses Hilight; hover wash uses HotTrackingColor / AccentPalette lights.' -ForegroundColor DarkGray
 
     if (-not $IncludeSystemAccent) {
         Write-Host '    System accent (Start/taskbar) left untouched. Use -IncludeSystemAccent to change it.' -ForegroundColor DarkGray
