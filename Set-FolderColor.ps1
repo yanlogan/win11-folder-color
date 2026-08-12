@@ -91,8 +91,8 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 
 # Icon groups that affect default / thumbnail folder looks on modern Windows.
-# 1023 = Libraries ("Files" in some nav pane customizations)
-$FolderIconGroups = @(3, 4, 5, 6, 162, 174, 1023)
+# 1023 = Libraries root ("Files"); 1001-1005 = CameraRoll/Docs/Pictures/Music/Videos
+$FolderIconGroups = @(3, 4, 5, 6, 162, 174, 1001, 1002, 1003, 1004, 1005, 1023)
 $ImageresMun = Join-Path $env:SystemRoot 'SystemResources\imageres.dll.mun'
 $AdminSidGrant = '*S-1-5-32-544:(F)'
 
