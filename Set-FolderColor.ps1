@@ -592,12 +592,12 @@ function Restore-SelectionColors {
         if ($b.Hilight) { $hilight = [string]$b.Hilight }
         if ($b.HilightText) { $hilightText = [string]$b.HilightText }
         if ($b.HotTrackingColor) { $hot = [string]$b.HotTrackingColor }
-        if ($null -ne $b.AccentColor) { $accent = [int]$b.AccentColor }
-        if ($null -ne $b.ColorizationColor) { $colorization = [int]$b.ColorizationColor }
+        if ($null -ne $b.AccentColor) { $accent = [uint32]$b.AccentColor }
+        if ($null -ne $b.ColorizationColor) { $colorization = [uint32]$b.ColorizationColor }
         if ($null -ne $b.ColorPrevalence) { $prevalence = [int]$b.ColorPrevalence }
         if ($null -ne $b.DwmColorPrevalence) { $dwmPrevalence = [int]$b.DwmColorPrevalence }
-        if ($null -ne $b.AccentColorMenu) { $accentMenu = [int]$b.AccentColorMenu }
-        if ($null -ne $b.StartColorMenu) { $startMenu = [int]$b.StartColorMenu }
+        if ($null -ne $b.AccentColorMenu) { $accentMenu = [uint32]$b.AccentColorMenu }
+        if ($null -ne $b.StartColorMenu) { $startMenu = [uint32]$b.StartColorMenu }
         if (($b.PSObject.Properties.Name -contains 'AccentPaletteHex') -and $b.AccentPaletteHex) {
             $paletteHex = [string]$b.AccentPaletteHex
         }
