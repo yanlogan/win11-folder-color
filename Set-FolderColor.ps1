@@ -1,31 +1,42 @@
 #Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-  Recolor default Windows 11/10 folder icons system-wide (including Medium / Large / Tiles / Content).
+  Recolor default Windows 11/10 folder icons and selection highlights system-wide.
 
 .DESCRIPTION
   Patches C:\Windows\SystemResources\imageres.dll.mun icon groups used for folder glyphs
-  and folder thumbnails. Also sets Explorer Shell Icons as a fallback for small views.
+  and folder thumbnails. Also sets Explorer Shell Icons as a fallback for small views,
+  and applies classic + accent selection colors (text highlight + drag/selection rectangle).
 
   Requires Resource Hacker (freeware): https://angusj.com/resourcehacker/
+  (not needed for -SelectionOnly / selection restore)
 
 .PARAMETER Color
-  Target folder color as #RRGGBB (default #800000 maroon).
+  Target folder + selection color as #RRGGBB (default #800000 maroon).
 
 .PARAMETER IconPath
   Optional existing .ico to use instead of recoloring the system folder icon.
 
 .PARAMETER Restore
-  Restore the original imageres.dll.mun from backup and clear Shell Icons overrides.
+  Restore original imageres.dll.mun, Shell Icons, and selection colors from backups.
 
 .PARAMETER SkipShellIcons
   Do not write HKLM Shell Icons values 3/4.
+
+.PARAMETER SkipSelection
+  Do not change text/element selection colors.
+
+.PARAMETER SelectionOnly
+  Only apply selection colors (skip imageres / Shell Icons patching).
 
 .PARAMETER WorkDir
   Working directory for backups and temp files (default: %LOCALAPPDATA%\win11-folder-color).
 
 .EXAMPLE
   .\Set-FolderColor.ps1 -Color '#800000'
+
+.EXAMPLE
+  .\Set-FolderColor.ps1 -SelectionOnly -Color '#800000'
 
 .EXAMPLE
   .\Set-FolderColor.ps1 -IconPath 'C:\Icons\my-folder.ico'
@@ -36,6 +47,7 @@
 [CmdletBinding(DefaultParameterSetName = 'Apply')]
 param(
     [Parameter(ParameterSetName = 'Apply')]
+    [Parameter(ParameterSetName = 'SelectionOnly')]
     [ValidatePattern('^#?[0-9A-Fa-f]{6}$')]
     [string]$Color = '#800000',
 
@@ -47,6 +59,12 @@ param(
 
     [Parameter(ParameterSetName = 'Apply')]
     [switch]$SkipShellIcons,
+
+    [Parameter(ParameterSetName = 'Apply')]
+    [switch]$SkipSelection,
+
+    [Parameter(ParameterSetName = 'SelectionOnly', Mandatory = $true)]
+    [switch]$SelectionOnly,
 
     [string]$WorkDir = $(Join-Path $env:LOCALAPPDATA 'win11-folder-color'),
 
@@ -400,6 +418,107 @@ function Install-Mun([string]$PatchedMun, [string]$BackupMun) {
     }
 }
 
+function Convert-RgbToAccentDword($Rgb) {
+    # DWM AccentColor is ABGR: Alpha | Blue | Green | Red
+    return [int]((0xFF -shl 24) -bor ($Rgb.B -shl 16) -bor ($Rgb.G -shl 8) -bor $Rgb.R)
+}
+
+function Get-SelectionBackupPath {
+    return (Join-Path $WorkDir 'selection-colors.json')
+}
+
+function Backup-SelectionColors {
+    $path = Get-SelectionBackupPath
+    if (Test-Path -LiteralPath $path) { return }
+
+    $colorsKey = 'HKCU:\Control Panel\Colors'
+    $dwmKey = 'HKCU:\Software\Microsoft\Windows\DWM'
+    $themeKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize'
+
+    $backup = [ordered]@{
+        SavedAt            = (Get-Date).ToString('o')
+        Hilight            = (Get-ItemProperty $colorsKey -Name Hilight -EA SilentlyContinue).Hilight
+        HilightText        = (Get-ItemProperty $colorsKey -Name HilightText -EA SilentlyContinue).HilightText
+        HotTrackingColor   = (Get-ItemProperty $colorsKey -Name HotTrackingColor -EA SilentlyContinue).HotTrackingColor
+        AccentColor        = (Get-ItemProperty $dwmKey -Name AccentColor -EA SilentlyContinue).AccentColor
+        ColorizationColor  = (Get-ItemProperty $dwmKey -Name ColorizationColor -EA SilentlyContinue).ColorizationColor
+        ColorPrevalence    = (Get-ItemProperty $themeKey -Name ColorPrevalence -EA SilentlyContinue).ColorPrevalence
+    }
+    ($backup | ConvertTo-Json) | Set-Content -LiteralPath $path -Encoding UTF8
+    Write-Step "Selection colors backup: $path"
+}
+
+function Set-SelectionColors($Rgb) {
+    Backup-SelectionColors
+
+    $rgbText = '{0} {1} {2}' -f $Rgb.R, $Rgb.G, $Rgb.B
+    # White text on dark highlight; near-black on very light colors.
+    $luma = (0.299 * $Rgb.R + 0.587 * $Rgb.G + 0.114 * $Rgb.B)
+    $textRgb = if ($luma -ge 160) { '0 0 0' } else { '255 255 255' }
+    $accent = Convert-RgbToAccentDword $Rgb
+
+    $colorsKey = 'HKCU:\Control Panel\Colors'
+    Set-ItemProperty -Path $colorsKey -Name 'Hilight' -Value $rgbText
+    Set-ItemProperty -Path $colorsKey -Name 'HilightText' -Value $textRgb
+    Set-ItemProperty -Path $colorsKey -Name 'HotTrackingColor' -Value $rgbText
+
+    $dwmKey = 'HKCU:\Software\Microsoft\Windows\DWM'
+    if (-not (Test-Path $dwmKey)) { New-Item $dwmKey -Force | Out-Null }
+    Set-ItemProperty -Path $dwmKey -Name 'AccentColor' -Type DWord -Value $accent
+    Set-ItemProperty -Path $dwmKey -Name 'ColorizationColor' -Type DWord -Value $accent
+
+    $themeKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize'
+    if (-not (Test-Path $themeKey)) { New-Item $themeKey -Force | Out-Null }
+    Set-ItemProperty -Path $themeKey -Name 'ColorPrevalence' -Type DWord -Value 1
+
+    Write-Step ("Selection colors set: Hilight/HotTracking={0}, HilightText={1}, Accent=0x{2:X8}" -f $rgbText, $textRgb, $accent)
+    Write-Host '    Text highlight + selection rectangle use Control Panel Colors.' -ForegroundColor DarkGray
+    Write-Host '    Some Win11 chrome follows AccentColor; a sign-out may be required.' -ForegroundColor DarkGray
+}
+
+function Restore-SelectionColors {
+    $path = Get-SelectionBackupPath
+    $colorsKey = 'HKCU:\Control Panel\Colors'
+    $dwmKey = 'HKCU:\Software\Microsoft\Windows\DWM'
+    $themeKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize'
+
+    # Stock Windows defaults if no backup file exists.
+    $hilight = '0 120 215'
+    $hilightText = '255 255 255'
+    $hot = '0 102 204'
+    $accent = $null
+    $colorization = $null
+    $prevalence = $null
+
+    if (Test-Path -LiteralPath $path) {
+        $b = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+        if ($b.Hilight) { $hilight = [string]$b.Hilight }
+        if ($b.HilightText) { $hilightText = [string]$b.HilightText }
+        if ($b.HotTrackingColor) { $hot = [string]$b.HotTrackingColor }
+        if ($null -ne $b.AccentColor) { $accent = [int]$b.AccentColor }
+        if ($null -ne $b.ColorizationColor) { $colorization = [int]$b.ColorizationColor }
+        if ($null -ne $b.ColorPrevalence) { $prevalence = [int]$b.ColorPrevalence }
+        Write-Step "Restoring selection colors from $path"
+    }
+    else {
+        Write-Step 'No selection backup found — applying stock blue defaults'
+    }
+
+    Set-ItemProperty -Path $colorsKey -Name 'Hilight' -Value $hilight
+    Set-ItemProperty -Path $colorsKey -Name 'HilightText' -Value $hilightText
+    Set-ItemProperty -Path $colorsKey -Name 'HotTrackingColor' -Value $hot
+
+    if ($null -ne $accent) {
+        Set-ItemProperty -Path $dwmKey -Name 'AccentColor' -Type DWord -Value $accent
+    }
+    if ($null -ne $colorization) {
+        Set-ItemProperty -Path $dwmKey -Name 'ColorizationColor' -Type DWord -Value $colorization
+    }
+    if ($null -ne $prevalence) {
+        Set-ItemProperty -Path $themeKey -Name 'ColorPrevalence' -Type DWord -Value $prevalence
+    }
+}
+
 function Restore-Mun([string]$BackupMun) {
     if (-not (Test-Path -LiteralPath $BackupMun)) {
         $alt = Join-Path (Split-Path $ImageresMun -Parent) 'imageres.dll.mun.precolor_backup'
@@ -433,18 +552,31 @@ $stableIco = Join-Path $WorkDir 'folder-colored.ico'
 
 if ($Restore) {
     Write-Step 'Restoring original folder icons...'
-    Restore-Mun -BackupMun $backupMun
+    $altMun = Join-Path (Split-Path $ImageresMun -Parent) 'imageres.dll.mun.precolor_backup'
+    if ((Test-Path -LiteralPath $backupMun) -or (Test-Path -LiteralPath $altMun)) {
+        try { Restore-Mun -BackupMun $backupMun } catch { Write-Host "    Mun restore skipped: $_" -ForegroundColor DarkYellow }
+    }
+    else {
+        Write-Host '    No mun backup found — skipping icon restore.' -ForegroundColor DarkYellow
+    }
     Clear-ShellIcons
-    # Ensure thumbnails are allowed again.
+    Restore-SelectionColors
     Set-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name IconsOnly -Type DWord -Value 0 -Force
     Clear-IconCaches
     Start-Process explorer
-    Write-Host 'Restored. If icons look wrong, sign out/in once.' -ForegroundColor Green
+    Write-Host 'Restored. For selection colors, sign out/in once if they look unchanged.' -ForegroundColor Green
     return
 }
 
 $rgb = Resolve-ColorRgb $Color
 Write-Step ("Target color {0} (R={1} G={2} B={3})" -f $rgb.Hex, $rgb.R, $rgb.G, $rgb.B)
+
+if ($SelectionOnly) {
+    Set-SelectionColors -Rgb $rgb
+    Write-Host ''
+    Write-Host ("Selection colors applied ({0}). Sign out/in if highlight still looks old." -f $rgb.Hex) -ForegroundColor Green
+    return
+}
 
 if ($IconPath) {
     if (-not (Test-Path -LiteralPath $IconPath)) { throw "Icon not found: $IconPath" }
@@ -485,6 +617,10 @@ if (-not $SkipShellIcons) {
     Set-ShellIcons -Ico $stableIco
 }
 
+if (-not $SkipSelection) {
+    Set-SelectionColors -Rgb $rgb
+}
+
 # Keep real thumbnails for files; mun patch covers folder medium/tiles/content.
 Set-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name IconsOnly -Type DWord -Value 0 -Force
 
@@ -494,7 +630,9 @@ Start-Sleep -Seconds 1
 Start-Process (Join-Path $env:SystemRoot 'System32\ie4uinit.exe') -ArgumentList '-show' -WindowStyle Hidden -ErrorAction SilentlyContinue
 
 Write-Host ''
-Write-Host ("Done. Default folders should now be {0}." -f $rgb.Hex) -ForegroundColor Green
+Write-Host ("Done. Folders + selection should use {0}." -f $rgb.Hex) -ForegroundColor Green
 Write-Host "Backup: $backupMun"
 Write-Host 'Restore later:  .\Set-FolderColor.ps1 -Restore'
+Write-Host 'Selection only: .\Set-FolderColor.ps1 -SelectionOnly -Color ''#800000'''
 Write-Host 'Note: Feature updates may restore stock icons — re-run this script.'
+Write-Host 'Note: Text/selection highlight may need sign-out/in to fully apply.'
