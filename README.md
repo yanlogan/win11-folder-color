@@ -4,9 +4,9 @@
 
 Дополнительно ставит **цвет выделения** того же оттенка:
 - фон выделения текста (`Hilight` / `HilightText`)
-- рамка/заливка выделения элементов (`HotTrackingColor`)
-- accent Windows (`AccentColor`) для части современного UI
+- рамка/заливка drag-выделения (`HotTrackingColor`)
 
+Опционально (`-IncludeSystemAccent`) — ещё и системный accent (`AccentPalette` / Start / taskbar). **По умолчанию выключено**, потому что это перекрашивает меню Пуск и панель задач.
 Классический трюк с реестром `Shell Icons` Windows игнорирует на medium+ видах: там рисуются **thumbnail папок** из `imageres.dll.mun`. Скрипт патчит этот файл (с бэкапом) и дополнительно прописывает `Shell Icons` как запасной вариант для мелких иконок.
 
 ![concept](https://img.shields.io/badge/Windows-11%20%2F%2010-blue) ![ps](https://img.shields.io/badge/PowerShell-5.1%2B-steelblue) ![license](https://img.shields.io/badge/license-MIT-green)
@@ -35,8 +35,11 @@ cd path\to\win11-folder-color
 .\Set-FolderColor.ps1 -Color '#C71313'
 .\Set-FolderColor.ps1 -Color 1E90FF
 
-# только выделение текста/элементов (без патча иконок)
+# только выделение текста/marquee (без патча иконок и без Start/taskbar)
 .\Set-FolderColor.ps1 -SelectionOnly -Color '#800000'
+
+# то же + системный accent (Start/taskbar тоже перекрасятся)
+.\Set-FolderColor.ps1 -SelectionOnly -Color '#800000' -IncludeSystemAccent
 
 # папки без смены выделения
 .\Set-FolderColor.ps1 -Color '#800000' -SkipSelection
@@ -58,8 +61,7 @@ cd path\to\win11-folder-color
 | Группы иконок `3,4,5,6,162,174` в `imageres.dll.mun` | Дефолтные и thumbnail-иконки папок (medium / tiles / content) |
 | `HKLM\...\Explorer\Shell Icons` значения `3` и `4` | Запасной вариант для мелких/списочных видов |
 | `HKCU\Control Panel\Colors` → `Hilight`, `HilightText`, `HotTrackingColor` | Выделение текста и прямоугольник выделения |
-| `HKCU\...\DWM` → `AccentColor`, `ColorizationColor` | Акцент Windows / часть современного UI |
-| `HKCU\...\Explorer\Accent` → `AccentPalette`, `AccentColorMenu` | Рамка/подсветка выбранных элементов в Explorer |
+| `HKCU\...\Explorer\Accent` + DWM accent (`-IncludeSystemAccent`) | Start / taskbar / рамки Explorer (опционально) |
 | Бэкап в `%LOCALAPPDATA%\win11-folder-color\` | Оригинальный mun, `.ico`, `selection-colors.json` |
 
 Скрипт выставляет `IconsOnly=0`, чтобы **превью фото и видео оставались включены**.

@@ -26,6 +26,11 @@
 .PARAMETER SkipSelection
   Do not change text/element selection colors.
 
+.PARAMETER IncludeSystemAccent
+  Also rewrite Explorer AccentPalette / AccentColorMenu / DWM accent.
+  WARNING: this recolors Start menu, taskbar accent, and other system chrome.
+  Off by default — selection text/marquee use Hilight + HotTrackingColor only.
+
 .PARAMETER SelectionOnly
   Only apply selection colors (skip imageres / Shell Icons patching).
 
@@ -62,6 +67,10 @@ param(
 
     [Parameter(ParameterSetName = 'Apply')]
     [switch]$SkipSelection,
+
+    [Parameter(ParameterSetName = 'Apply')]
+    [Parameter(ParameterSetName = 'SelectionOnly')]
+    [switch]$IncludeSystemAccent,
 
     [Parameter(ParameterSetName = 'SelectionOnly', Mandatory = $true)]
     [switch]$SelectionOnly,
@@ -517,42 +526,47 @@ function Backup-SelectionColors {
     Write-Step "Selection colors backup: $path"
 }
 
-function Set-SelectionColors($Rgb) {
+function Set-SelectionColors($Rgb, [switch]$IncludeSystemAccent) {
     Backup-SelectionColors
 
     $rgbText = '{0} {1} {2}' -f $Rgb.R, $Rgb.G, $Rgb.B
     $luma = (0.299 * $Rgb.R + 0.587 * $Rgb.G + 0.114 * $Rgb.B)
     $textRgb = if ($luma -ge 160) { '0 0 0' } else { '255 255 255' }
-    $accent = Convert-RgbToAccentDword $Rgb
-    $palette = New-AccentPaletteBytes $Rgb
 
     $colorsKey = 'HKCU:\Control Panel\Colors'
     Set-ItemProperty -Path $colorsKey -Name 'Hilight' -Value $rgbText
     Set-ItemProperty -Path $colorsKey -Name 'HilightText' -Value $textRgb
     Set-ItemProperty -Path $colorsKey -Name 'HotTrackingColor' -Value $rgbText
 
+    Write-Step ("Selection colors set: Hilight/HotTracking={0}, HilightText={1}" -f $rgbText, $textRgb)
+    Write-Host '    Text highlight + drag marquee use Control Panel Colors.' -ForegroundColor DarkGray
+
+    if (-not $IncludeSystemAccent) {
+        Write-Host '    System accent (Start/taskbar) left untouched. Use -IncludeSystemAccent to change it.' -ForegroundColor DarkGray
+        return
+    }
+
+    $accent = Convert-RgbToAccentDword $Rgb
+    $palette = New-AccentPaletteBytes $Rgb
+
     $dwmKey = 'HKCU:\Software\Microsoft\Windows\DWM'
     if (-not (Test-Path $dwmKey)) { New-Item $dwmKey -Force | Out-Null }
-    Set-ItemProperty -Path $dwmKey -Name 'AccentColor' -Type DWord -Value $accent
-    Set-ItemProperty -Path $dwmKey -Name 'ColorizationColor' -Type DWord -Value $accent
+    Set-ItemProperty -Path $dwmKey -Name 'AccentColor' -Type DWord -Value ([uint32]$accent)
+    Set-ItemProperty -Path $dwmKey -Name 'ColorizationColor' -Type DWord -Value ([uint32]$accent)
     Set-ItemProperty -Path $dwmKey -Name 'ColorPrevalence' -Type DWord -Value 1
 
     $themeKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize'
     if (-not (Test-Path $themeKey)) { New-Item $themeKey -Force | Out-Null }
     Set-ItemProperty -Path $themeKey -Name 'ColorPrevalence' -Type DWord -Value 1
 
-    # Explorer item selection / chrome accent (this is what keeps the blue border otherwise)
     $accentKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Accent'
     if (-not (Test-Path $accentKey)) { New-Item $accentKey -Force | Out-Null }
     New-ItemProperty -Path $accentKey -Name 'AccentPalette' -PropertyType Binary -Value $palette -Force | Out-Null
-    Set-ItemProperty -Path $accentKey -Name 'AccentColorMenu' -Type DWord -Value $accent
-    Set-ItemProperty -Path $accentKey -Name 'StartColorMenu' -Type DWord -Value $accent
+    Set-ItemProperty -Path $accentKey -Name 'AccentColorMenu' -Type DWord -Value ([uint32]$accent)
+    Set-ItemProperty -Path $accentKey -Name 'StartColorMenu' -Type DWord -Value ([uint32]$accent)
 
     Send-ImmersiveColorChange
-
-    Write-Step ("Selection colors set: Hilight/HotTracking={0}, HilightText={1}, Accent=0x{2:X8}" -f $rgbText, $textRgb, $accent)
-    Write-Host '    Updated AccentPalette + AccentColorMenu (Explorer selection chrome).' -ForegroundColor DarkGray
-    Write-Host '    If item borders stay old-colored, restart Explorer or sign out once more.' -ForegroundColor DarkGray
+    Write-Host ("    Also set system accent 0x{0:X8} (Start/taskbar/Explorer chrome)." -f [uint32]$accent) -ForegroundColor DarkYellow
 }
 
 function Restore-SelectionColors {
@@ -676,7 +690,7 @@ $rgb = Resolve-ColorRgb $Color
 Write-Step ("Target color {0} (R={1} G={2} B={3})" -f $rgb.Hex, $rgb.R, $rgb.G, $rgb.B)
 
 if ($SelectionOnly) {
-    Set-SelectionColors -Rgb $rgb
+    Set-SelectionColors -Rgb $rgb -IncludeSystemAccent:$IncludeSystemAccent
     Write-Host ''
     Write-Host ("Selection colors applied ({0}). Sign out/in if highlight still looks old." -f $rgb.Hex) -ForegroundColor Green
     return
@@ -722,7 +736,7 @@ if (-not $SkipShellIcons) {
 }
 
 if (-not $SkipSelection) {
-    Set-SelectionColors -Rgb $rgb
+    Set-SelectionColors -Rgb $rgb -IncludeSystemAccent:$IncludeSystemAccent
 }
 
 # Keep real thumbnails for files; mun patch covers folder medium/tiles/content.
