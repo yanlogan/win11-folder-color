@@ -419,8 +419,53 @@ function Install-Mun([string]$PatchedMun, [string]$BackupMun) {
 }
 
 function Convert-RgbToAccentDword($Rgb) {
-    # DWM AccentColor is ABGR: Alpha | Blue | Green | Red
+    # DWM / AccentColorMenu = ABGR DWORD
     return [int]((0xFF -shl 24) -bor ($Rgb.B -shl 16) -bor ($Rgb.G -shl 8) -bor $Rgb.R)
+}
+
+function New-AccentPaletteBytes($Rgb) {
+    # Explorer\Accent\AccentPalette = 8 x RGBA (A usually 0), light -> dark.
+    # Slot 3 (bytes 12..14) is the main accent used by many Explorer chrome bits.
+    $factors = @(1.75, 1.45, 1.2, 1.0, 0.85, 0.65, 0.45, 0.3)
+    $bytes = New-Object byte[] 32
+    for ($i = 0; $i -lt 8; $i++) {
+        $f = $factors[$i]
+        $r = [byte][Math]::Min(255, [Math]::Round($Rgb.R * $f))
+        $g = [byte][Math]::Min(255, [Math]::Round($Rgb.G * $f))
+        $b = [byte][Math]::Min(255, [Math]::Round($Rgb.B * $f))
+        $o = $i * 4
+        $bytes[$o] = $r
+        $bytes[$o + 1] = $g
+        $bytes[$o + 2] = $b
+        $bytes[$o + 3] = 0
+    }
+    return $bytes
+}
+
+function Send-ImmersiveColorChange {
+    try {
+        $sig = @'
+using System;
+using System.Runtime.InteropServices;
+public static class NativeTheme {
+  [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+  public static extern IntPtr SendMessageTimeout(
+    IntPtr hWnd, uint Msg, UIntPtr wParam, string lParam,
+    uint fuFlags, uint uTimeout, out UIntPtr lpdwResult);
+}
+'@
+        if (-not ('NativeTheme' -as [type])) { Add-Type -TypeDefinition $sig }
+        $HWND_BROADCAST = [IntPtr]0xffff
+        $WM_SETTINGCHANGE = 0x1A
+        $SMTO_ABORTIFHUNG = 0x0002
+        $result = [UIntPtr]::Zero
+        [void][NativeTheme]::SendMessageTimeout(
+            $HWND_BROADCAST, $WM_SETTINGCHANGE, [UIntPtr]::Zero,
+            'ImmersiveColorSet', $SMTO_ABORTIFHUNG, 5000, [ref]$result)
+    }
+    catch {
+        Write-Host "    ImmersiveColorSet broadcast failed: $_" -ForegroundColor DarkYellow
+    }
 }
 
 function Get-SelectionBackupPath {
@@ -429,20 +474,35 @@ function Get-SelectionBackupPath {
 
 function Backup-SelectionColors {
     $path = Get-SelectionBackupPath
-    if (Test-Path -LiteralPath $path) { return }
-
     $colorsKey = 'HKCU:\Control Panel\Colors'
     $dwmKey = 'HKCU:\Software\Microsoft\Windows\DWM'
     $themeKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize'
+    $accentKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Accent'
+
+    $existing = $null
+    if (Test-Path -LiteralPath $path) {
+        try { $existing = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json } catch { $existing = $null }
+        if ($existing -and $existing.AccentPaletteHex) { return }
+    }
+
+    $palette = $null
+    $paletteProp = Get-ItemProperty $accentKey -Name AccentPalette -EA SilentlyContinue
+    if ($paletteProp -and $paletteProp.AccentPalette) {
+        $palette = ([byte[]]$paletteProp.AccentPalette | ForEach-Object { $_.ToString('X2') }) -join '-'
+    }
 
     $backup = [ordered]@{
-        SavedAt            = (Get-Date).ToString('o')
-        Hilight            = (Get-ItemProperty $colorsKey -Name Hilight -EA SilentlyContinue).Hilight
-        HilightText        = (Get-ItemProperty $colorsKey -Name HilightText -EA SilentlyContinue).HilightText
-        HotTrackingColor   = (Get-ItemProperty $colorsKey -Name HotTrackingColor -EA SilentlyContinue).HotTrackingColor
-        AccentColor        = (Get-ItemProperty $dwmKey -Name AccentColor -EA SilentlyContinue).AccentColor
-        ColorizationColor  = (Get-ItemProperty $dwmKey -Name ColorizationColor -EA SilentlyContinue).ColorizationColor
-        ColorPrevalence    = (Get-ItemProperty $themeKey -Name ColorPrevalence -EA SilentlyContinue).ColorPrevalence
+        SavedAt            = if ($existing -and $existing.SavedAt) { $existing.SavedAt } else { (Get-Date).ToString('o') }
+        Hilight            = if ($existing -and $existing.Hilight) { $existing.Hilight } else { (Get-ItemProperty $colorsKey -Name Hilight -EA SilentlyContinue).Hilight }
+        HilightText        = if ($existing -and $existing.HilightText) { $existing.HilightText } else { (Get-ItemProperty $colorsKey -Name HilightText -EA SilentlyContinue).HilightText }
+        HotTrackingColor   = if ($existing -and $existing.HotTrackingColor) { $existing.HotTrackingColor } else { (Get-ItemProperty $colorsKey -Name HotTrackingColor -EA SilentlyContinue).HotTrackingColor }
+        AccentColor        = if ($existing -and $null -ne $existing.AccentColor) { $existing.AccentColor } else { (Get-ItemProperty $dwmKey -Name AccentColor -EA SilentlyContinue).AccentColor }
+        ColorizationColor  = if ($existing -and $null -ne $existing.ColorizationColor) { $existing.ColorizationColor } else { (Get-ItemProperty $dwmKey -Name ColorizationColor -EA SilentlyContinue).ColorizationColor }
+        DwmColorPrevalence = if ($existing -and $null -ne $existing.DwmColorPrevalence) { $existing.DwmColorPrevalence } else { (Get-ItemProperty $dwmKey -Name ColorPrevalence -EA SilentlyContinue).ColorPrevalence }
+        ColorPrevalence    = if ($existing -and $null -ne $existing.ColorPrevalence) { $existing.ColorPrevalence } else { (Get-ItemProperty $themeKey -Name ColorPrevalence -EA SilentlyContinue).ColorPrevalence }
+        AccentColorMenu    = (Get-ItemProperty $accentKey -Name AccentColorMenu -EA SilentlyContinue).AccentColorMenu
+        StartColorMenu     = (Get-ItemProperty $accentKey -Name StartColorMenu -EA SilentlyContinue).StartColorMenu
+        AccentPaletteHex   = $palette
     }
     ($backup | ConvertTo-Json) | Set-Content -LiteralPath $path -Encoding UTF8
     Write-Step "Selection colors backup: $path"
@@ -452,10 +512,10 @@ function Set-SelectionColors($Rgb) {
     Backup-SelectionColors
 
     $rgbText = '{0} {1} {2}' -f $Rgb.R, $Rgb.G, $Rgb.B
-    # White text on dark highlight; near-black on very light colors.
     $luma = (0.299 * $Rgb.R + 0.587 * $Rgb.G + 0.114 * $Rgb.B)
     $textRgb = if ($luma -ge 160) { '0 0 0' } else { '255 255 255' }
     $accent = Convert-RgbToAccentDword $Rgb
+    $palette = New-AccentPaletteBytes $Rgb
 
     $colorsKey = 'HKCU:\Control Panel\Colors'
     Set-ItemProperty -Path $colorsKey -Name 'Hilight' -Value $rgbText
@@ -466,14 +526,24 @@ function Set-SelectionColors($Rgb) {
     if (-not (Test-Path $dwmKey)) { New-Item $dwmKey -Force | Out-Null }
     Set-ItemProperty -Path $dwmKey -Name 'AccentColor' -Type DWord -Value $accent
     Set-ItemProperty -Path $dwmKey -Name 'ColorizationColor' -Type DWord -Value $accent
+    Set-ItemProperty -Path $dwmKey -Name 'ColorPrevalence' -Type DWord -Value 1
 
     $themeKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize'
     if (-not (Test-Path $themeKey)) { New-Item $themeKey -Force | Out-Null }
     Set-ItemProperty -Path $themeKey -Name 'ColorPrevalence' -Type DWord -Value 1
 
+    # Explorer item selection / chrome accent (this is what keeps the blue border otherwise)
+    $accentKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Accent'
+    if (-not (Test-Path $accentKey)) { New-Item $accentKey -Force | Out-Null }
+    New-ItemProperty -Path $accentKey -Name 'AccentPalette' -PropertyType Binary -Value $palette -Force | Out-Null
+    Set-ItemProperty -Path $accentKey -Name 'AccentColorMenu' -Type DWord -Value $accent
+    Set-ItemProperty -Path $accentKey -Name 'StartColorMenu' -Type DWord -Value $accent
+
+    Send-ImmersiveColorChange
+
     Write-Step ("Selection colors set: Hilight/HotTracking={0}, HilightText={1}, Accent=0x{2:X8}" -f $rgbText, $textRgb, $accent)
-    Write-Host '    Text highlight + selection rectangle use Control Panel Colors.' -ForegroundColor DarkGray
-    Write-Host '    Some Win11 chrome follows AccentColor; a sign-out may be required.' -ForegroundColor DarkGray
+    Write-Host '    Updated AccentPalette + AccentColorMenu (Explorer selection chrome).' -ForegroundColor DarkGray
+    Write-Host '    If item borders stay old-colored, restart Explorer or sign out once more.' -ForegroundColor DarkGray
 }
 
 function Restore-SelectionColors {
@@ -481,14 +551,18 @@ function Restore-SelectionColors {
     $colorsKey = 'HKCU:\Control Panel\Colors'
     $dwmKey = 'HKCU:\Software\Microsoft\Windows\DWM'
     $themeKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize'
+    $accentKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Accent'
 
-    # Stock Windows defaults if no backup file exists.
     $hilight = '0 120 215'
     $hilightText = '255 255 255'
     $hot = '0 102 204'
     $accent = $null
     $colorization = $null
     $prevalence = $null
+    $dwmPrevalence = $null
+    $accentMenu = $null
+    $startMenu = $null
+    $paletteHex = $null
 
     if (Test-Path -LiteralPath $path) {
         $b = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
@@ -498,6 +572,10 @@ function Restore-SelectionColors {
         if ($null -ne $b.AccentColor) { $accent = [int]$b.AccentColor }
         if ($null -ne $b.ColorizationColor) { $colorization = [int]$b.ColorizationColor }
         if ($null -ne $b.ColorPrevalence) { $prevalence = [int]$b.ColorPrevalence }
+        if ($null -ne $b.DwmColorPrevalence) { $dwmPrevalence = [int]$b.DwmColorPrevalence }
+        if ($null -ne $b.AccentColorMenu) { $accentMenu = [int]$b.AccentColorMenu }
+        if ($null -ne $b.StartColorMenu) { $startMenu = [int]$b.StartColorMenu }
+        if ($b.AccentPaletteHex) { $paletteHex = [string]$b.AccentPaletteHex }
         Write-Step "Restoring selection colors from $path"
     }
     else {
@@ -514,9 +592,24 @@ function Restore-SelectionColors {
     if ($null -ne $colorization) {
         Set-ItemProperty -Path $dwmKey -Name 'ColorizationColor' -Type DWord -Value $colorization
     }
+    if ($null -ne $dwmPrevalence) {
+        Set-ItemProperty -Path $dwmKey -Name 'ColorPrevalence' -Type DWord -Value $dwmPrevalence
+    }
     if ($null -ne $prevalence) {
         Set-ItemProperty -Path $themeKey -Name 'ColorPrevalence' -Type DWord -Value $prevalence
     }
+    if ($null -ne $accentMenu) {
+        Set-ItemProperty -Path $accentKey -Name 'AccentColorMenu' -Type DWord -Value $accentMenu
+    }
+    if ($null -ne $startMenu) {
+        Set-ItemProperty -Path $accentKey -Name 'StartColorMenu' -Type DWord -Value $startMenu
+    }
+    if ($paletteHex) {
+        $bytes = ($paletteHex -split '-' | ForEach-Object { [Convert]::ToByte($_, 16) })
+        New-ItemProperty -Path $accentKey -Name 'AccentPalette' -PropertyType Binary -Value ([byte[]]$bytes) -Force | Out-Null
+    }
+
+    Send-ImmersiveColorChange
 }
 
 function Restore-Mun([string]$BackupMun) {

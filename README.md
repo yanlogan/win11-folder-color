@@ -59,6 +59,7 @@ cd path\to\win11-folder-color
 | `HKLM\...\Explorer\Shell Icons` значения `3` и `4` | Запасной вариант для мелких/списочных видов |
 | `HKCU\Control Panel\Colors` → `Hilight`, `HilightText`, `HotTrackingColor` | Выделение текста и прямоугольник выделения |
 | `HKCU\...\DWM` → `AccentColor`, `ColorizationColor` | Акцент Windows / часть современного UI |
+| `HKCU\...\Explorer\Accent` → `AccentPalette`, `AccentColorMenu` | Рамка/подсветка выбранных элементов в Explorer |
 | Бэкап в `%LOCALAPPDATA%\win11-folder-color\` | Оригинальный mun, `.ico`, `selection-colors.json` |
 
 Скрипт выставляет `IconsOnly=0`, чтобы **превью фото и видео оставались включены**.
